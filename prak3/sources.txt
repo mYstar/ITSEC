@@ -1,0 +1,2 @@
+Di 1. Nov 09:00:32 CET 2011: http://www.openssl.org/source/openssl-1.0.0e.tar.gz
+Di 1. Nov 09:01:29 CET 2011: http://www.openssl.org/source/openssl-1.0.0e.tar.gz.sha1
