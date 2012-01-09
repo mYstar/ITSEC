@@ -6,24 +6,30 @@
 #define G 1357
 #define P 2281
 
-int mod_pow(int base, int power, int modulo)
+unsigned long mod_pow(unsigned long base, unsigned long power, unsigned long modulo)
 {
-  int res=1, i, numshift = (sizeof(int)*8);
+  unsigned long res=1, i;
 
-  for(i=0; i<numshift; i++)
+  for(i=0;power!=0; i++)
   {
-    if(power & (1<<(numshift-1)))
-      res = ((int)(pow(res, 2) + 0.5) *base)%modulo;
+    if(power & 1)
+      res = (res*res *base)%modulo;
     else
-      res = ((int)(pow(res, 2) + 0.5))%modulo;
-    power <<= 1;
+      res = (res*res)%modulo;
+    power >>= 1;
   }
   return res;
 }
 
 int main()
 {
-  printf("%d\n", mod_pow(13, 7, 100));
+  int alpha=0, a=0;
 
+  for(a=0; alpha!=ALPHA; a++)
+  {
+    alpha=mod_pow(G,a,P);
+  }
+
+  printf("a= %d\n, %lu\n", a-1, mod_pow(G,a,P));
   return 0;
 }
