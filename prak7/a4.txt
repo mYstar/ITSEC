@@ -1,0 +1,2 @@
+(1) mit dem privaten key
+(2) alle Daten des input files
