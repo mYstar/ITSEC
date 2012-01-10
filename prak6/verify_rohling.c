@@ -34,7 +34,7 @@ int main()
 	unsigned char output[BSIZE];
 	int t, length;
 
-	keyfp = fopen("pubkey.pem", "r");
+  	keyfp = fopen("pubkey.pem", "r");
 	if (!keyfp)
 		return 1;
 
