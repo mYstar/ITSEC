@@ -6,30 +6,30 @@
 #define G 1357
 #define P 2281
 
-unsigned long mod_pow(unsigned long base, unsigned long power, unsigned long modulo)
+long long mod_pow(long long base, long long power, long long modulo)
 {
-  unsigned long res=1, i;
+  long long res=base;
 
-  for(i=0;power!=0; i++)
+  int numshift = (int)(log2((double)power))-1; //because of initialisation the first 1 can be ommitted
+
+  for(; numshift>=0; numshift--)
   {
-    if(power & 1)
+    if((power>>numshift) & 1)
       res = (res*res *base)%modulo;
     else
       res = (res*res)%modulo;
-    power >>= 1;
   }
   return res;
 }
 
 int main()
 {
-  int alpha=0, a=0;
+  long long a, alpha;
 
-  for(a=0; alpha!=ALPHA; a++)
-  {
-    alpha=mod_pow(G,a,P);
-  }
+  for(a=1; alpha!=ALPHA; a++)
+    alpha = mod_pow(G,a,P);
 
-  printf("a= %d\n, %lu\n", a-1, mod_pow(G,a,P));
+  printf("%llu\n",a-1);
+
   return 0;
 }
