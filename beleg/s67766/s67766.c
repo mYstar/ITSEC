@@ -22,21 +22,59 @@ void print_bytes(unsigned char *data, int length)
     printf("%02X", data[i]);
 }
 
+long read_file(char *file, unsigned char **data_out)
+{
+  int file_descriptor;
+  struct stat file_prop;
+  long file_size, read_size;
+
+  file_descriptor = open(file, O_RDONLY);
+  if(file_descriptor == -1)
+  {
+    printf("opening file %s returned error\n", file);
+    perror("");
+    return -1;
+  }
+
+  fstat(file_descriptor, &file_prop);
+  file_size = file_prop.st_size;
+
+  *data_out = malloc(file_size);
+
+  read_size = read(file_descriptor, *data_out, file_size);
+  if(read_size != file_size)
+  {
+    printf("reading %s returned error, %ld Bytes read\n",file, read_size);
+    if(read_size==-1)
+      perror("");
+    return -1;
+  }
+
+  if(close(file_descriptor) == -1)
+  {
+    printf("closing file %s returned error\n", file);
+    perror("");
+    return -1;
+  }
+  return read_size;
+}
+
 int main(int argc, char *argv[])
 {
   int clobbered_key_fd, cipher_of_secret_text_fd, cipher_of_signed_key_fd, plain_fd;
 	FILE *rsapub_key_fp;
   unsigned char *cam128_key, *cam128_iv;
-  unsigned char *cipher_of_secret_text, *cipher_of_signed_key, *signed_key, *secret_text;
+  unsigned char *cipher_of_secret_text, *cipher_of_signed_key, *signed_key, *secret_text, *clobbered_key;
 	EVP_PKEY *rsapub_key;
   unsigned char *rc4_40_key;
   const EVP_CIPHER *cam128_cfb8, *rc4_40;
   EVP_CIPHER_CTX cam128_cfb8_ctx, rc4_40_ctx;
   const EVP_MD *sha;
   EVP_MD_CTX sha_ctx;
-  int cam128_cfb8_keylen, cam128_cfb8_ivlen, rc4_40_keylen, cipher_of_secret_text_size, cipher_of_signed_key_size, secret_text_size, signed_key_size;
+  int cam128_cfb8_keylen, cam128_cfb8_ivlen, rc4_40_keylen, cipher_of_secret_text_size,  secret_text_size, signed_key_size;
   int ret, count;
   struct stat file_prop;
+  long cipher_of_signed_key_size, clobbered_key_size;
 
   // get the parameters for CAMELLIA128_cfb8
   cam128_cfb8 = EVP_camellia_128_cfb8();
@@ -57,34 +95,14 @@ int main(int argc, char *argv[])
   cam128_key = malloc(cam128_cfb8_keylen);
   cam128_iv = malloc(cam128_cfb8_ivlen);
 
-  clobbered_key_fd = open(clobbered_key_file, O_RDONLY);
-  if(clobbered_key_fd == -1)
+  clobbered_key_size = read_file(clobbered_key_file, &clobbered_key);
+  if(clobbered_key_size != cam128_cfb8_keylen+cam128_cfb8_ivlen)
   {
-    printf("opening file %s returned error\n", clobbered_key_file);
+    printf("reading file %s returned not enough Bytes: %ld, instead of: %d\n", clobbered_key_file, clobbered_key_size, cam128_cfb8_keylen+cam128_cfb8_ivlen);
     perror("");
   }
-
-  ret = read(clobbered_key_fd, cam128_key, cam128_cfb8_keylen);
-  if(ret != cam128_cfb8_keylen)
-  {
-    printf("reading cam128_key returned error, %d Bytes read\n", ret);
-    if(ret==-1)
-      perror("");
-  }
-
-  ret = read(clobbered_key_fd, cam128_iv, cam128_cfb8_ivlen);
-  if(ret != cam128_cfb8_ivlen)
-  {
-    printf("reading cam128_iv returned error, %d Bytes read\n", ret);
-    if(ret==-1)
-      perror("");
-  }
-
-  if(close(clobbered_key_fd)== -1)
-  {
-    printf("closing file %s returned error\n", clobbered_key_file);
-    perror("");
-  }
+  memcpy(cam128_key, clobbered_key, cam128_cfb8_keylen);
+  memcpy(cam128_iv, clobbered_key+cam128_cfb8_keylen, cam128_cfb8_ivlen);
 
   printf("cam128_key: ");
   print_bytes(cam128_key, cam128_cfb8_keylen);
@@ -93,32 +111,7 @@ int main(int argc, char *argv[])
   printf("\n");
 
   // read the s67766-cipher-of-signed-key.bin
-  cipher_of_signed_key_fd = open(cipher_of_signed_key_file, O_RDONLY);
-  if(cipher_of_signed_key_fd == -1)
-  {
-    printf("opening file %s returned error\n", cipher_of_signed_key_file);
-    perror("");
-  }
-
-  fstat(cipher_of_signed_key_fd, &file_prop);
-  cipher_of_signed_key_size = file_prop.st_size;
-  printf("cipher_of_signed_key_size: %d\n", cipher_of_signed_key_size);
-
-  cipher_of_signed_key = malloc(cipher_of_signed_key_size);
-
-  ret = read(cipher_of_signed_key_fd, cipher_of_signed_key, cipher_of_signed_key_size);
-  if(ret != cipher_of_signed_key_size)
-  {
-    printf("reading cam128_key returned error, %d Bytes read\n", ret);
-    if(ret==-1)
-      perror("");
-  }
-
-  if(close(cipher_of_signed_key_fd) == -1)
-  {
-    printf("closing file %s returned error\n", cipher_of_signed_key_file);
-    perror("");
-  }
+  cipher_of_signed_key_size = read_file(cipher_of_signed_key_file, &cipher_of_signed_key);
 
   printf("cipher_of_signed_key: ");
   print_bytes(cipher_of_signed_key, cipher_of_signed_key_size);
@@ -171,11 +164,6 @@ int main(int argc, char *argv[])
     signed_key_size+=ret;
     printf("signed_key_size: %d\n", signed_key_size);
 
-    //check signature of encrypted key
-    //printf("signed_key: ");
-    //print_bytes(signed_key, signed_key_size);
-    //printf("\n");
-
     if(EVP_VerifyInit(&sha_ctx, sha) == 0)
     {
       printf("EVP_VerifyInit returned error for SHA\n");
@@ -207,32 +195,7 @@ int main(int argc, char *argv[])
   printf("\n");
 
   // read the s67766-cipher-of-secret-text.bin
-  cipher_of_secret_text_fd = open(cipher_of_secret_text_file, O_RDONLY);
-  if(cipher_of_secret_text_fd == -1)
-  {
-    printf("opening file %s returned error\n", cipher_of_secret_text_file);
-    perror("");
-  }
-
-  fstat(cipher_of_secret_text_fd, &file_prop);
-  cipher_of_secret_text_size = file_prop.st_size;
-  printf("cipher_of_secret_text_size: %d\n", cipher_of_secret_text_size);
-
-  cipher_of_secret_text = malloc(cipher_of_secret_text_size);
-
-  ret = read(cipher_of_secret_text_fd, cipher_of_secret_text, cipher_of_secret_text_size);
-  if(ret != cipher_of_secret_text_size)
-  {
-    printf("reading %s returned error, %d Bytes read\n",cipher_of_secret_text_file, ret);
-    if(ret==-1)
-      perror("");
-  }
-
-  if(close(cipher_of_secret_text_fd) == -1)
-  {
-    printf("closing file %s returned error\n", cipher_of_secret_text_file);
-    perror("");
-  }
+  cipher_of_secret_text_size = read_file(cipher_of_secret_text_file, &cipher_of_secret_text);
 
   printf("cipher_of_secret_text: ");
   print_bytes(cipher_of_secret_text, cipher_of_secret_text_size);
