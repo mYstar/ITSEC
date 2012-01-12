@@ -22,6 +22,36 @@ void print_bytes(unsigned char *data, int length)
     printf("%02X", data[i]);
 }
 
+int write_file(char *file,unsigned char* data_in, long data_size)
+{
+  int file_descriptor, ret;
+
+  file_descriptor = open(file, O_WRONLY | O_CREAT);
+  if(file_descriptor == -1)
+  {
+    printf("opening file %s returned error\n", plain_file);
+    perror("");
+    return -1;
+  }
+
+  ret = write(file_descriptor, data_in, data_size);
+  if(ret != data_size)
+  {
+    printf("writing %s returned error, %d Bytes read\n",file, ret);
+    if(ret==-1)
+      perror("");
+    return -1;
+  }
+
+  if(close(file_descriptor) == -1)
+  {
+    printf("closing file %s returned error\n", file);
+    perror("");
+    return -1;
+  }
+  return 0;
+}
+
 long read_file(char *file, unsigned char **data_out)
 {
   int file_descriptor;
@@ -59,22 +89,50 @@ long read_file(char *file, unsigned char **data_out)
   return read_size;
 }
 
+long decrypt(const EVP_CIPHER *cipher_type, unsigned char **data_plain, unsigned char *data_cipher, long data_cipher_size, unsigned char *key, unsigned char *iv)
+{
+  EVP_CIPHER_CTX cipher_ctx;
+  *data_plain = malloc(data_cipher_size);
+  long data_plain_size = 0;
+  int ret;
+
+  //decrypt the cipher with extracted key
+  EVP_CIPHER_CTX_init(&cipher_ctx);
+  if(EVP_DecryptInit_ex(&cipher_ctx, cipher_type, NULL, key, iv)==0)
+  {
+    printf("EVP_DecryptInit returned error\n");
+    return -1;
+  }
+  if(EVP_DecryptUpdate(&cipher_ctx, *data_plain, &ret, data_cipher, data_cipher_size)==0)
+  {
+    printf("EVP_DecryptUpdate returned error\n");
+    return -1;
+  }
+  data_plain_size+=ret;
+  if(EVP_DecryptFinal(&cipher_ctx, *data_plain+data_plain_size, &ret)==0)
+  {
+    printf("EVP_DecryptFinal returned error\n");
+    return -1;
+  }
+  return data_plain_size+ret;
+}
+
 int main(int argc, char *argv[])
 {
   int clobbered_key_fd, cipher_of_secret_text_fd, cipher_of_signed_key_fd, plain_fd;
-	FILE *rsapub_key_fp;
+  FILE *rsapub_key_fp;
   unsigned char *cam128_key, *cam128_iv;
   unsigned char *cipher_of_secret_text, *cipher_of_signed_key, *signed_key, *secret_text, *clobbered_key;
-	EVP_PKEY *rsapub_key;
+  EVP_PKEY *rsapub_key;
   unsigned char *rc4_40_key;
   const EVP_CIPHER *cam128_cfb8, *rc4_40;
   EVP_CIPHER_CTX cam128_cfb8_ctx, rc4_40_ctx;
   const EVP_MD *sha;
   EVP_MD_CTX sha_ctx;
-  int cam128_cfb8_keylen, cam128_cfb8_ivlen, rc4_40_keylen, cipher_of_secret_text_size,  secret_text_size, signed_key_size;
+  int cam128_cfb8_keylen, cam128_cfb8_ivlen, rc4_40_keylen, signed_key_size;
   int ret, count;
   struct stat file_prop;
-  long cipher_of_signed_key_size, clobbered_key_size;
+  long cipher_of_signed_key_size, clobbered_key_size, cipher_of_secret_text_size,  secret_text_size;
 
   // get the parameters for CAMELLIA128_cfb8
   cam128_cfb8 = EVP_camellia_128_cfb8();
@@ -118,8 +176,8 @@ int main(int argc, char *argv[])
   printf("\n");
 
   // read the public key from rsapub.pem
-	rsapub_key_fp = fopen(rsapub_key_file, "r");
-	if (!rsapub_key_fp)
+  rsapub_key_fp = fopen(rsapub_key_file, "r");
+  if (!rsapub_key_fp)
   {
     printf("opening file %s returned error\n", rsapub_key_file);
     perror("");
@@ -142,26 +200,15 @@ int main(int argc, char *argv[])
   for(count = 0; count<=255; count++)
   {
     memset(cam128_key, count, 1);
-    signed_key_size = 0;
     //print_bytes(cam128_key, cam128_cfb8_keylen);
     //printf("\n");
 
     //decrypt the cipher with guessed key
-    EVP_CIPHER_CTX_init(&cam128_cfb8_ctx);
-    if(EVP_DecryptInit_ex(&cam128_cfb8_ctx, cam128_cfb8, NULL, cam128_key, cam128_iv)==0)
+    signed_key_size =  decrypt(cam128_cfb8, &signed_key, cipher_of_signed_key, cipher_of_signed_key_size, cam128_key, cam128_iv);
+    if(signed_key_size==-1)
     {
-      printf("EVP_DecryptInit returned error for CAMELLIA128_cfb8\n");
+      return -1;
     }
-    if(EVP_DecryptUpdate(&cam128_cfb8_ctx, signed_key, &ret, cipher_of_signed_key, cipher_of_signed_key_size)==0)
-    {
-      printf("EVP_DecryptUpdate returned error for CAMELLIA128_cfb8\n");
-    }
-    signed_key_size+=ret;
-    if(EVP_DecryptFinal(&cam128_cfb8_ctx, signed_key+signed_key_size, &ret)==0)
-    {
-      printf("EVP_DecryptFinal returned error for CAMELLIA128_cfb8\n");
-    }
-    signed_key_size+=ret;
     printf("signed_key_size: %d\n", signed_key_size);
 
     if(EVP_VerifyInit(&sha_ctx, sha) == 0)
@@ -206,44 +253,14 @@ int main(int argc, char *argv[])
   secret_text_size = 0;
 
   //decrypt the cipher with extracted key
-  EVP_CIPHER_CTX_init(&rc4_40_ctx);
-  if(EVP_DecryptInit_ex(&rc4_40_ctx, rc4_40, NULL, rc4_40_key, NULL)==0)
-  {
-    printf("EVP_DecryptInit returned error for RC-4_40\n");
-  }
-  if(EVP_DecryptUpdate(&rc4_40_ctx, secret_text, &ret, cipher_of_secret_text, cipher_of_secret_text_size)==0)
-  {
-    printf("EVP_DecryptUpdate returned error for RC-4_40\n");
-  }
-  secret_text_size+=ret;
-  if(EVP_DecryptFinal(&rc4_40_ctx, secret_text+secret_text_size, &ret)==0)
-  {
-    printf("EVP_DecryptFinal returned error for RC-4_40\n");
-  }
-  secret_text_size+=ret;
-  printf("secret_text_size: %d\n", secret_text_size);
+  secret_text_size =  decrypt(rc4_40, &secret_text, cipher_of_secret_text, cipher_of_secret_text_size, rc4_40_key, NULL);
+  printf("secret_text_size: %ld\n", secret_text_size);
   printf("secret_text: %s %s\n", secret_text, secret_text+11);
 
   // write the s67766-plain.bin
-  plain_fd = open(plain_file, O_WRONLY | O_CREAT);
-  if(plain_fd == -1)
+  if(write_file(plain_file, secret_text, secret_text_size)==-1)
   {
-    printf("opening file %s returned error\n", plain_file);
-    perror("");
-  }
-
-  ret = write(plain_fd, secret_text, secret_text_size);
-  if(ret != secret_text_size)
-  {
-    printf("writing %s returned error, %d Bytes read\n",plain_file, ret);
-    if(ret==-1)
-      perror("");
-  }
-
-  if(close(plain_fd) == -1)
-  {
-    printf("closing file %s returned error\n", plain_file);
-    perror("");
+    return -1;
   }
 
   return 0;
