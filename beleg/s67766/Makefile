@@ -1,4 +1,4 @@
-OPENSSLDIR=~/7.Sem/ITSEC/openssl-1.0.0e
+OPENSSLDIR=~/src/openssl-1.0.0e
 
 .c:
-	cc -Wall -g -L $(OPENSSLDIR) -I $(OPENSSLDIR)/include $< -lcrypto -o $@
+	cc -Wall -g -L $(OPENSSLDIR) -I $(OPENSSLDIR)/include $< -lcrypto -ldl -o $@
